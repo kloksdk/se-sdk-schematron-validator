@@ -1,4 +1,4 @@
-package eu.domibus.se.sdk.validation;
+package eu.domibus.se.kloksdk.validation;
 
 import eu.domibus.core.spi.validation.UserMessageValidatorSpi;
 import eu.domibus.core.spi.validation.UserMessageValidatorSpiException;
