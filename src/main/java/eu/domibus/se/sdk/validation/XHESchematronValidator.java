@@ -18,16 +18,12 @@ import java.util.Scanner;
 public class XHESchematronValidator implements UserMessageValidatorSpi {
 
     private static final DomibusLogger log = DomibusLoggerFactory.getLogger(XHESchematronValidator.class);
-
-    private final Processor processor;
-    private final XsltCompiler xsltCompiler;
-    private XsltExecutable xsltExecutable;
-
     private static ThreadLocal<XsltTransformer> threadLocalTransformer;
 
     public XHESchematronValidator() {
-        processor = new Processor(false);
-        xsltCompiler = processor.newXsltCompiler();
+        Processor processor = new Processor(false);
+        XsltCompiler xsltCompiler = processor.newXsltCompiler();
+        XsltExecutable xsltExecutable;
         try {
             xsltExecutable = xsltCompiler.compile(new StreamSource("classpath:DIGG-XHE-Business-Rules.xslt"));
 
@@ -35,19 +31,7 @@ public class XHESchematronValidator implements UserMessageValidatorSpi {
             throw new RuntimeException("Failed to start XHESchematronValidator: Could not compile xhe-schematron.xsl", e);
         }
 
-        threadLocalTransformer = ThreadLocal.withInitial(() -> xsltExecutable.load());
-    }
-
-    @Override
-    public void validateUserMessage(UserMessageDTO userMessageDTO) throws UserMessageValidatorSpiException {
-        long startTime = System.currentTimeMillis();
-        if (log.isTraceEnabled()) {
-            log.trace("XHESchematronValidator.validateUserMessage starting validateUserMessage");
-            // userMessage as JSON
-            log.trace("userMessageDTO: " + userMessageDTO);
-        }
-
-
+        threadLocalTransformer = ThreadLocal.withInitial(xsltExecutable::load);
     }
 
     @Override
@@ -62,22 +46,23 @@ public class XHESchematronValidator implements UserMessageValidatorSpi {
             inputStream = new ByteArrayInputStream(payload.getBytes());
         }
 
-        XdmDestination chainResult = new XdmDestination();
-        threadLocalTransformer.get().setDestination(chainResult);
+        XdmDestination validationResult = new XdmDestination();
+        XsltTransformer schematronTransformer = threadLocalTransformer.get();
+        schematronTransformer.setDestination(validationResult);
 
         try {
-            threadLocalTransformer.get().setSource(new StreamSource(inputStream));
-            threadLocalTransformer.get().transform();
+            schematronTransformer.setSource(new StreamSource(inputStream));
+            schematronTransformer.transform();
         } catch (SaxonApiException e) {
             throw new UserMessageValidatorSpiException("Failed to validate payload, could not run schematron transform", e);
         }
 
         List<String> errorList = new ArrayList<>();
-        XdmNode rootNode = chainResult.getXdmNode();
+        XdmNode rootNode = validationResult.getXdmNode();
 
         for (XdmSequenceIterator<XdmNode> it = rootNode.axisIterator(Axis.CHILD); it.hasNext(); ) {
-            XdmItem item = it.next();
-            XdmNode node = (XdmNode) item;
+            XdmNode node = it.next();
+
             if ("failed-assert".equals(node.getNodeName().getLocalName())) {
                 errorList.add(node.getAttributeValue(new QName("test")));
             }
@@ -93,6 +78,19 @@ public class XHESchematronValidator implements UserMessageValidatorSpi {
             long duration = System.currentTimeMillis() - startTime;
             log.trace("Payload is valid. Validation took {}}ms.", duration);
         }
+    }
+
+    @Override
+    public void validateUserMessage(UserMessageDTO userMessageDTO) throws UserMessageValidatorSpiException {
+        long startTime = System.currentTimeMillis();
+        if (log.isTraceEnabled()) {
+            log.trace("XHESchematronValidator.validateUserMessage starting validateUserMessage");
+            // userMessage as JSON
+            log.trace("userMessageDTO: " + userMessageDTO);
+        }
+
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("validateUserMessage() done. It took {}ms.", duration);
     }
 
     public String inputStreamToString(InputStream stream) {
